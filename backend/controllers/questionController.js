@@ -1,6 +1,8 @@
 const Question = require('../models/Question');
 const AssessmentProgress = require('../models/AssessmentProgress');
 
+const hasTemplatePair = (tpl) => Boolean(tpl && typeof tpl.visibleCode === 'string' && typeof tpl.hiddenDriver === 'string');
+
 exports.getAllQuestionsWithProgress = async (req, res) => {
     try {
         const { username } = req.query; // rollNo passed from frontend
@@ -36,10 +38,14 @@ exports.createQuestion = async (req, res) => {
     try {
         const questionData = req.body;
         
-        if (!questionData.templates?.cpp || !questionData.templates?.python) {
+        if (
+            !hasTemplatePair(questionData.templates?.cpp) ||
+            !hasTemplatePair(questionData.templates?.python) ||
+            !hasTemplatePair(questionData.templates?.java)
+        ) {
             return res.status(400).json({ 
                 success: false, 
-                error: "At least C++ and Python templates are required." 
+                error: "C++, Python, and Java templates must include both visibleCode and hiddenDriver." 
             });
         }
 
@@ -59,18 +65,13 @@ exports.createQuestion = async (req, res) => {
 
 exports.getAllQuestions = async (req, res) => {
     try {
-        const questions = await Question.find().select('title difficulty points hiddenTestCases');
-        
-        // Transform the data so the frontend knows the total XP and Total Testcases
+        const questions = await Question.find().select('title difficulty');
+
+        // Lightweight payload for admin problem selection.
         const formattedQuestions = questions.map(q => ({
             id: q._id,
             title: q.title,
-            xp: q.points,
-            testCasesTotal: q.hiddenTestCases.length,
-            // These will be filled by the User's submission history later
-            testCasesPassed: 0, 
-            score: 0,
-            status: 'UNATTEMPTED'
+            difficulty: q.difficulty
         }));
 
         res.json({ success: true, data: formattedQuestions });
@@ -92,5 +93,83 @@ exports.getQuestionById = async (req, res) => {
     } catch (err) {
         console.error("Error fetching question by ID:", err);
         res.status(500).json({ success: false, error: "Failed to fetch question details." });
+    }
+};
+
+// Fetch full question payload for admin question editor tab.
+exports.getAllQuestionsFull = async (req, res) => {
+    try {
+        const questions = await Question.find().sort({ _id: -1 });
+        res.json({ success: true, data: questions });
+    } catch (err) {
+        res.status(500).json({ success: false, error: "Failed to fetch full questions." });
+    }
+};
+
+// Update a question while preserving existing template code when partial updates are sent.
+exports.updateQuestion = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updateData = req.body;
+
+        const existing = await Question.findById(id);
+        if (!existing) {
+            return res.status(404).json({ success: false, error: "Question not found." });
+        }
+
+        const mergedTemplates = {
+            cpp: {
+                visibleCode: updateData.templates?.cpp?.visibleCode ?? existing.templates?.cpp?.visibleCode ?? "",
+                hiddenDriver: updateData.templates?.cpp?.hiddenDriver ?? existing.templates?.cpp?.hiddenDriver ?? ""
+            },
+            python: {
+                visibleCode: updateData.templates?.python?.visibleCode ?? existing.templates?.python?.visibleCode ?? "",
+                hiddenDriver: updateData.templates?.python?.hiddenDriver ?? existing.templates?.python?.hiddenDriver ?? ""
+            },
+            java: {
+                visibleCode: updateData.templates?.java?.visibleCode ?? existing.templates?.java?.visibleCode ?? "",
+                hiddenDriver: updateData.templates?.java?.hiddenDriver ?? existing.templates?.java?.hiddenDriver ?? ""
+            }
+        };
+
+        if (!hasTemplatePair(mergedTemplates.cpp) || !hasTemplatePair(mergedTemplates.python) || !hasTemplatePair(mergedTemplates.java)) {
+            return res.status(400).json({
+                success: false,
+                error: "C++, Python, and Java templates must include both visibleCode and hiddenDriver."
+            });
+        }
+
+        Object.assign(existing, updateData);
+        existing.templates = mergedTemplates;
+
+        await existing.save();
+
+        return res.json({
+            success: true,
+            message: "Question updated successfully.",
+            data: existing
+        });
+    } catch (err) {
+        console.error("Error updating question:", err);
+        return res.status(500).json({ success: false, error: "Failed to update question." });
+    }
+};
+
+exports.deleteQuestion = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const deleted = await Question.findByIdAndDelete(id);
+        if (!deleted) {
+            return res.status(404).json({ success: false, error: "Question not found." });
+        }
+
+        return res.json({
+            success: true,
+            message: "Question deleted successfully."
+        });
+    } catch (err) {
+        console.error("Error deleting question:", err);
+        return res.status(500).json({ success: false, error: "Failed to delete question." });
     }
 };

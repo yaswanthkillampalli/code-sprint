@@ -1,7 +1,5 @@
 const Assessment = require('../models/Assessment');
 const User = require('../models/User');
-const Question = require('../models/Question');
-const XLSX = require('xlsx');
 const bcrypt = require('bcrypt');
 const AssessmentProgress = require('../models/AssessmentProgress');
 
@@ -68,33 +66,6 @@ exports.getAllAssessments = async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).json({ success: false, error: "Failed to fetch assessments" });
-    }
-};
-
-// Fetch the latest assessment for the student waiting room
-exports.getCurrentAssessment = async (req, res) => {
-    try {
-        // Grab the most recently created assessment
-        const assessment = await Assessment.findOne().sort({ _id: -1 });
-        
-        if (!assessment) {
-            return res.json({ success: false, error: "No active assessments found." });
-        }
-
-        res.json({
-            success: true,
-            data: {
-                id: assessment._id,
-                title: assessment.title,
-                durationMinutes: assessment.durationMinutes,
-                startTime: assessment.startTime,
-                totalQuestions: assessment.questions.length,
-                status: assessment.status // 'waiting' or 'active'
-            }
-        });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, error: "Failed to fetch status." });
     }
 };
 

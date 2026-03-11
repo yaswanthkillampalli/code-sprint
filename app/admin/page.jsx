@@ -2,8 +2,75 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
+import Editor from "@monaco-editor/react";
 import * as XLSX from 'xlsx';
-import { loginAdmin, fetchAllQuestions, createAssessment, fetchLeaderboard, fetchAssessments, startAssessment, deleteAssessment, verifyToken } from "../../lib/api";
+import {
+  loginAdmin,
+  fetchAllQuestions,
+  fetchAllQuestionsFull,
+  addQuestion,
+  updateQuestion,
+  removeQuestion,
+  createAssessment,
+  fetchLeaderboard,
+  fetchAssessments,
+  startAssessment,
+  deleteAssessment,
+  verifyToken
+} from "../../lib/api";
+
+const createEmptyQuestionForm = () => ({
+  title: "",
+  difficulty: "Medium",
+  points: 10,
+  task: "",
+  description: "",
+  constraints: "",
+  inputFormat: "",
+  outputFormat: "",
+  examplesText: "[]",
+  hiddenTestCasesText: "[]",
+  templates: {
+    cpp: { visibleCode: "", hiddenDriver: "" },
+    python: { visibleCode: "", hiddenDriver: "" },
+    java: { visibleCode: "", hiddenDriver: "" }
+  }
+});
+
+const toJsonEditor = (value) => JSON.stringify(value || [], null, 2);
+
+const toQuestionForm = (question) => ({
+  title: question.title || "",
+  difficulty: question.difficulty || "Medium",
+  points: question.points ?? 10,
+  task: question.task || "",
+  description: question.description || "",
+  constraints: question.constraints || "",
+  inputFormat: question.inputFormat || "",
+  outputFormat: question.outputFormat || "",
+  examplesText: toJsonEditor(question.examples),
+  hiddenTestCasesText: toJsonEditor(question.hiddenTestCases),
+  templates: {
+    cpp: {
+      visibleCode: question.templates?.cpp?.visibleCode || "",
+      hiddenDriver: question.templates?.cpp?.hiddenDriver || ""
+    },
+    python: {
+      visibleCode: question.templates?.python?.visibleCode || "",
+      hiddenDriver: question.templates?.python?.hiddenDriver || ""
+    },
+    java: {
+      visibleCode: question.templates?.java?.visibleCode || "",
+      hiddenDriver: question.templates?.java?.hiddenDriver || ""
+    }
+  }
+});
+
+const editorLanguageMap = {
+  cpp: "cpp",
+  python: "python",
+  java: "java"
+};
 
 export default function AdminDashboard() {
   // --- AUTHENTICATION STATE ---
@@ -20,6 +87,11 @@ export default function AdminDashboard() {
   const [problemPool, setProblemPool] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
   const [assessmentsList, setAssessmentsList] = useState([]);
+  const [questionBank, setQuestionBank] = useState([]);
+  const [selectedQuestionId, setSelectedQuestionId] = useState(null);
+  const [questionForm, setQuestionForm] = useState(createEmptyQuestionForm());
+  const [questionError, setQuestionError] = useState("");
+  const [isSavingQuestion, setIsSavingQuestion] = useState(false);
 
   // --- USER MANAGEMENT STATE ---
   const [stagedUsers, setStagedUsers] = useState([]);
@@ -31,6 +103,16 @@ export default function AdminDashboard() {
     duration: 120,
     selectedProblems: [],
   });
+
+  const loadQuestionData = async () => {
+    const [poolRes, fullRes] = await Promise.all([
+      fetchAllQuestions(),
+      fetchAllQuestionsFull()
+    ]);
+
+    setProblemPool(poolRes?.data || []);
+    setQuestionBank(fullRes?.data || []);
+  };
 
   // --- AUTO-LOGIN: VERIFY TOKEN ON MOUNT ---
   useEffect(() => {
@@ -64,7 +146,7 @@ export default function AdminDashboard() {
     if (!isAuthenticated) return;
 
     // Fetch all required data for the dashboard
-    fetchAllQuestions().then((res) => setProblemPool(res?.data || []));
+    loadQuestionData();
     fetchLeaderboard().then((res) => setLeaderboard(res?.data || []));
     fetchAssessments().then((res) => setAssessmentsList(res?.data || []));
   }, [isAuthenticated]);
@@ -92,6 +174,122 @@ export default function AdminDashboard() {
         ? prev.selectedProblems.filter(pId => pId !== id)
         : [...prev.selectedProblems, id]
     }));
+  };
+
+  const handleNewQuestion = () => {
+    setSelectedQuestionId(null);
+    setQuestionForm(createEmptyQuestionForm());
+    setQuestionError("");
+  };
+
+  const handleSelectQuestion = (question) => {
+    setSelectedQuestionId(question._id);
+    setQuestionForm(toQuestionForm(question));
+    setQuestionError("");
+  };
+
+  const handleQuestionFieldChange = (field, value) => {
+    setQuestionForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleTemplateFieldChange = (language, field, value) => {
+    setQuestionForm((prev) => ({
+      ...prev,
+      templates: {
+        ...prev.templates,
+        [language]: {
+          ...prev.templates[language],
+          [field]: value
+        }
+      }
+    }));
+  };
+
+  const buildQuestionPayload = () => {
+    let examples;
+    let hiddenTestCases;
+
+    try {
+      examples = JSON.parse(questionForm.examplesText || "[]");
+      hiddenTestCases = JSON.parse(questionForm.hiddenTestCasesText || "[]");
+    } catch {
+      throw new Error("Examples and hidden test cases must be valid JSON arrays.");
+    }
+
+    if (!Array.isArray(examples) || !Array.isArray(hiddenTestCases)) {
+      throw new Error("Examples and hidden test cases must be JSON arrays.");
+    }
+
+    return {
+      title: questionForm.title.trim(),
+      difficulty: questionForm.difficulty,
+      points: Number(questionForm.points),
+      task: questionForm.task,
+      description: questionForm.description,
+      constraints: questionForm.constraints,
+      inputFormat: questionForm.inputFormat,
+      outputFormat: questionForm.outputFormat,
+      examples,
+      hiddenTestCases,
+      templates: questionForm.templates
+    };
+  };
+
+  const handleSaveQuestion = async () => {
+    setQuestionError("");
+    setIsSavingQuestion(true);
+
+    try {
+      const payload = buildQuestionPayload();
+
+      if (!payload.title || !payload.task) {
+        throw new Error("Title and task are required.");
+      }
+
+      const res = selectedQuestionId
+        ? await updateQuestion(selectedQuestionId, payload)
+        : await addQuestion(payload);
+
+      if (!res?.success) {
+        throw new Error(res?.error || "Failed to save question.");
+      }
+
+      await loadQuestionData();
+
+      const savedQuestionId = selectedQuestionId || res.questionId;
+      if (savedQuestionId) {
+        const fullRes = await fetchAllQuestionsFull();
+        const savedQuestion = (fullRes?.data || []).find((question) => question._id === savedQuestionId);
+        setQuestionBank(fullRes?.data || []);
+        if (savedQuestion) {
+          setSelectedQuestionId(savedQuestion._id);
+          setQuestionForm(toQuestionForm(savedQuestion));
+        }
+      }
+
+      alert(selectedQuestionId ? "Question updated successfully!" : "Question created successfully!");
+    } catch (err) {
+      setQuestionError(err.message || "Failed to save question.");
+    } finally {
+      setIsSavingQuestion(false);
+    }
+  };
+
+  const handleDeleteQuestion = async () => {
+    if (!selectedQuestionId) return;
+
+    if (!window.confirm("Are you sure you want to delete this question? This action cannot be undone.")) {
+      return;
+    }
+
+    const res = await removeQuestion(selectedQuestionId);
+    if (res?.success) {
+      await loadQuestionData();
+      handleNewQuestion();
+      alert("Question deleted successfully!");
+    } else {
+      setQuestionError(res?.error || "Failed to delete question.");
+    }
   };
 
   // HANDLE EXCEL TO JSON
@@ -288,6 +486,12 @@ export default function AdminDashboard() {
           >
             Live Leaderboard
           </button>
+          <button 
+            onClick={() => { setActiveTab("questions"); setIsCreating(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'questions' ? 'bg-blue-600 text-white' : 'hover:bg-slate-100 dark:hover:bg-zinc-800 opacity-70'}`}
+          >
+            Questions
+          </button>
         </nav>
 
         <div className="p-4 border-t" style={{ borderColor: 'var(--card-border)' }}>
@@ -426,7 +630,7 @@ export default function AdminDashboard() {
                   <label className="block text-sm font-bold mb-3 opacity-80">Select Problems ({newAssessment.selectedProblems.length} selected)</label>
                   <div className="border rounded-lg p-2 max-h-48 overflow-y-auto bg-slate-50 dark:bg-zinc-800/20" style={{ borderColor: 'var(--card-border)' }}>
                     {problemPool.map((prob) => {
-                      const problemId = prob._id || prob.id;
+                      const problemId = prob.id;
                       const difficulty = prob.difficulty || "Medium";
                       return (
                         <label key={problemId} className="flex items-center justify-between p-3 hover:bg-white dark:hover:bg-zinc-800 rounded-md cursor-pointer transition-colors border border-transparent hover:border-slate-200 dark:hover:border-zinc-700">
@@ -537,6 +741,174 @@ export default function AdminDashboard() {
                     )}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "questions" && (
+            <div className="grid grid-cols-[320px_minmax(0,1fr)] gap-8">
+              <div className="rounded-xl border bg-white dark:bg-zinc-900 shadow-sm" style={{ borderColor: 'var(--card-border)' }}>
+                <div className="flex items-center justify-between border-b p-4" style={{ borderColor: 'var(--card-border)' }}>
+                  <div>
+                    <h2 className="text-lg font-bold">Question Bank</h2>
+                    <p className="text-xs opacity-60">{questionBank.length} questions available</p>
+                  </div>
+                  <button
+                    onClick={handleNewQuestion}
+                    className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-700"
+                  >
+                    + New
+                  </button>
+                </div>
+                <div className="max-h-[calc(100vh-220px)] overflow-y-auto p-3 space-y-2">
+                  {questionBank.length === 0 ? (
+                    <div className="rounded-lg border border-dashed p-4 text-sm opacity-60" style={{ borderColor: 'var(--card-border)' }}>
+                      No questions found. Create one from the editor.
+                    </div>
+                  ) : (
+                    questionBank.map((question) => (
+                      <button
+                        key={question._id}
+                        onClick={() => handleSelectQuestion(question)}
+                        className={`w-full rounded-lg border p-3 text-left transition-colors ${selectedQuestionId === question._id ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/10' : 'border-transparent hover:border-slate-200 hover:bg-slate-50 dark:hover:border-zinc-700 dark:hover:bg-zinc-800'}`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-semibold">{question.title}</span>
+                          <span className={`rounded px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${question.difficulty === 'Easy' ? 'bg-green-100 text-green-700' : question.difficulty === 'Medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                            {question.difficulty}
+                          </span>
+                        </div>
+                        <div className="mt-2 text-xs opacity-60">
+                          {question.points} XP
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-xl border bg-white dark:bg-zinc-900 p-6 shadow-sm" style={{ borderColor: 'var(--card-border)' }}>
+                <div className="mb-6 flex items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl font-bold">{selectedQuestionId ? 'Edit Question' : 'Create Question'}</h2>
+                    <p className="text-sm opacity-60">Paste code snippets directly into each language block and save the full question.</p>
+                  </div>
+                  <div className="flex gap-3">
+                    {selectedQuestionId && (
+                      <button
+                        onClick={handleDeleteQuestion}
+                        className="rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-red-700"
+                      >
+                        Delete
+                      </button>
+                    )}
+                    <button
+                      onClick={handleSaveQuestion}
+                      disabled={isSavingQuestion}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {isSavingQuestion ? 'Saving...' : 'Save Question'}
+                    </button>
+                  </div>
+                </div>
+
+                {questionError && (
+                  <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-300">
+                    {questionError}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 gap-4 mb-6">
+                  <input type="text" placeholder="Question Title" value={questionForm.title} onChange={(e) => handleQuestionFieldChange('title', e.target.value)} className="w-full rounded-lg border p-3 outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 dark:bg-zinc-800/50" style={{ borderColor: 'var(--card-border)' }} />
+                  <select value={questionForm.difficulty} onChange={(e) => handleQuestionFieldChange('difficulty', e.target.value)} className="w-full rounded-lg border p-3 outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 dark:bg-zinc-800/50" style={{ borderColor: 'var(--card-border)' }}>
+                    <option value="Easy">Easy</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Hard">Hard</option>
+                  </select>
+                  <input type="number" min="0" placeholder="Points" value={questionForm.points} onChange={(e) => handleQuestionFieldChange('points', e.target.value)} className="w-full rounded-lg border p-3 outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 dark:bg-zinc-800/50" style={{ borderColor: 'var(--card-border)' }} />
+                </div>
+
+                <div className="space-y-4 mb-8">
+                  <textarea rows={3} placeholder="Task" value={questionForm.task} onChange={(e) => handleQuestionFieldChange('task', e.target.value)} className="w-full rounded-lg border p-3 outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 dark:bg-zinc-800/50" style={{ borderColor: 'var(--card-border)' }} />
+                  <textarea rows={4} placeholder="Description" value={questionForm.description} onChange={(e) => handleQuestionFieldChange('description', e.target.value)} className="w-full rounded-lg border p-3 outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 dark:bg-zinc-800/50" style={{ borderColor: 'var(--card-border)' }} />
+                  <div className="grid grid-cols-2 gap-4">
+                    <textarea rows={3} placeholder="Constraints" value={questionForm.constraints} onChange={(e) => handleQuestionFieldChange('constraints', e.target.value)} className="w-full rounded-lg border p-3 outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 dark:bg-zinc-800/50" style={{ borderColor: 'var(--card-border)' }} />
+                    <div className="space-y-4">
+                      <textarea rows={3} placeholder="Input Format" value={questionForm.inputFormat} onChange={(e) => handleQuestionFieldChange('inputFormat', e.target.value)} className="w-full rounded-lg border p-3 outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 dark:bg-zinc-800/50" style={{ borderColor: 'var(--card-border)' }} />
+                      <textarea rows={3} placeholder="Output Format" value={questionForm.outputFormat} onChange={(e) => handleQuestionFieldChange('outputFormat', e.target.value)} className="w-full rounded-lg border p-3 outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 dark:bg-zinc-800/50" style={{ borderColor: 'var(--card-border)' }} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-6 mb-8">
+                  <div>
+                    <label className="mb-2 block text-sm font-bold opacity-80">Examples JSON</label>
+                    <textarea rows={12} value={questionForm.examplesText} onChange={(e) => handleQuestionFieldChange('examplesText', e.target.value)} className="w-full rounded-lg border p-3 font-mono text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 dark:bg-zinc-800/50" style={{ borderColor: 'var(--card-border)' }} />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-bold opacity-80">Hidden Test Cases JSON</label>
+                    <textarea rows={12} value={questionForm.hiddenTestCasesText} onChange={(e) => handleQuestionFieldChange('hiddenTestCasesText', e.target.value)} className="w-full rounded-lg border p-3 font-mono text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 dark:bg-zinc-800/50" style={{ borderColor: 'var(--card-border)' }} />
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  {['cpp', 'python', 'java'].map((language) => (
+                    <div key={language} className="rounded-xl border p-4" style={{ borderColor: 'var(--card-border)' }}>
+                      <div className="mb-4 flex items-center justify-between">
+                        <h3 className="text-lg font-bold uppercase tracking-wide">{language} Templates</h3>
+                        <span className="text-xs opacity-60">Keep both visibleCode and hiddenDriver</span>
+                      </div>
+                      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                        <div>
+                          <label className="mb-2 block text-sm font-semibold opacity-80">Visible Code</label>
+                          <div className="overflow-hidden rounded-lg border bg-slate-950" style={{ borderColor: 'var(--card-border)' }}>
+                            <Editor
+                              height="320px"
+                              language={editorLanguageMap[language]}
+                              theme="vs-dark"
+                              value={questionForm.templates[language].visibleCode}
+                              onChange={(value) => handleTemplateFieldChange(language, 'visibleCode', value || '')}
+                              options={{
+                                minimap: { enabled: false },
+                                fontSize: 14,
+                                fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
+                                lineHeight: 22,
+                                padding: { top: 12 },
+                                scrollBeyondLastLine: false,
+                                automaticLayout: true,
+                                tabSize: 4,
+                                insertSpaces: true,
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-semibold opacity-80">Hidden Driver</label>
+                          <div className="overflow-hidden rounded-lg border bg-slate-950" style={{ borderColor: 'var(--card-border)' }}>
+                            <Editor
+                              height="320px"
+                              language={editorLanguageMap[language]}
+                              theme="vs-dark"
+                              value={questionForm.templates[language].hiddenDriver}
+                              onChange={(value) => handleTemplateFieldChange(language, 'hiddenDriver', value || '')}
+                              options={{
+                                minimap: { enabled: false },
+                                fontSize: 14,
+                                fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
+                                lineHeight: 22,
+                                padding: { top: 12 },
+                                scrollBeyondLastLine: false,
+                                automaticLayout: true,
+                                tabSize: 4,
+                                insertSpaces: true,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}

@@ -6,9 +6,11 @@ import { useRouter } from "next/navigation";
 import Editor from "@monaco-editor/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { toast } from "sonner";
+import { Zap, Trophy, Clock } from "lucide-react";
 import {
   fetchQuestionById,
-  fetchCurrentAssessment,
+  fetchAssessmentById,
   fetchQuestionsByAssessmentId,
   submitUserCode
 } from "../../../lib/api";
@@ -29,6 +31,7 @@ export default function ProblemEditorPage({ params }) {
   // GLOBAL EXAM TIMER
   const [timeLeft, setTimeLeft] = useState(0); 
   const [isTimerLoaded, setIsTimerLoaded] = useState(false);
+  const [timeExpired, setTimeExpired] = useState(false);
 
   // Initial Data Fetch & Global Timer Sync
   useEffect(() => {
@@ -42,8 +45,14 @@ export default function ProblemEditorPage({ params }) {
           return;
         }
 
-        // 1. Fetch the global exam status for timer and access control
-        const examRes = await fetchCurrentAssessment();
+        // 1. Fetch exam status for this user-assigned assessment id
+        const assessmentId = localStorage.getItem("assessmentId");
+        if (!assessmentId) {
+          router.push("/");
+          return;
+        }
+
+        const examRes = await fetchAssessmentById(assessmentId);
 
         if (!examRes?.success || !examRes?.data) {
           router.push("/");
@@ -51,9 +60,8 @@ export default function ProblemEditorPage({ params }) {
         }
 
         const examData = examRes.data;
-        const assessmentId = examData._id || examData.id || localStorage.getItem("assessmentId");
 
-        if (examData.status !== "active" || !assessmentId) {
+        if (examData.status !== "active") {
           router.push("/");
           return;
         }
@@ -92,7 +100,18 @@ export default function ProblemEditorPage({ params }) {
         );
 
         if (!allowedQuestionIds.has(String(id))) {
-          alert("This question is not part of the current assessment.");
+          toast.error(
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <span className="font-semibold">Invalid Question</span>
+            </div>,
+            {
+              description: "This question is not part of the current assessment.",
+              duration: 3000,
+            }
+          );
           router.push("/dashboard");
           return;
         }
@@ -122,7 +141,25 @@ export default function ProblemEditorPage({ params }) {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timerId);
-          // Auto-submit or lockout logic goes here later
+          setTimeExpired(true);
+          
+          // Show notification
+          toast.error(
+            <div className="flex items-center gap-2">
+              <Clock className="w-5 h-5" />
+              <span className="font-semibold">Time's Up! Exam has ended.</span>
+            </div>,
+            {
+              description: `Your assessment time has expired. Redirecting to dashboard...`,
+              duration: 4000,
+            }
+          );
+          
+          // Redirect after 2 seconds
+          setTimeout(() => {
+            router.push("/login");
+          }, 2000);
+          
           return 0;
         }
         return prev - 1;
@@ -130,7 +167,7 @@ export default function ProblemEditorPage({ params }) {
     }, 1000);
     
     return () => clearInterval(timerId);
-  }, [timeLeft, isTimerLoaded]);
+  }, [timeLeft, isTimerLoaded, router]);
 
   const formatTime = (seconds) => {
     const h = Math.floor(seconds / 3600).toString().padStart(2, "0");
@@ -185,14 +222,34 @@ export default function ProblemEditorPage({ params }) {
           console.log("✓ SUCCESS: Setting test results data");
           setTestResults(res.data);
 
-          // Show a fun alert if they scored points!
+          // Show a fun notification if they scored points!
           if (isSubmit && res.data.pointsEarned > 0) {
-              alert(`Awesome! You earned ${res.data.pointsEarned} XP!`);
+              toast.success(
+                <div className="flex items-center gap-2">
+                  <Zap className="w-5 h-5 text-yellow-500" />
+                  <span className="font-semibold">Awesome! You earned {res.data.pointsEarned} XP!</span>
+                </div>,
+                {
+                  description: `Great submission! Keep up the excellent work.`,
+                  duration: 4000,
+                }
+              );
           }
       } else {
           // LOG 3: Backend reached but returned a failure status
           console.warn("⚠ BACKEND LOGIC FAILURE:", res?.error || "No error message provided");
-          alert("Execution failed: " + (res?.error || "Unknown Error"));
+          toast.error(
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <span className="font-semibold">Execution Failed</span>
+            </div>,
+            {
+              description: res?.error || "Unknown error occurred",
+              duration: 4000,
+            }
+          );
       }
 
     } catch (err) {
@@ -202,7 +259,18 @@ export default function ProblemEditorPage({ params }) {
         response: err.response?.data, // If axios error, shows backend crash details
         status: err.response?.status
       });
-      alert("Failed to connect to the compilation server.");
+      toast.error(
+        <div className="flex items-center gap-2">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          <span className="font-semibold">Server is not responding</span>
+        </div>,
+        {
+          description: `Failed to connect to the compilation server. Please check your connection and try again.`,
+          duration: 4000,
+        }
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -234,6 +302,21 @@ export default function ProblemEditorPage({ params }) {
           </button>
         </div>
       )}
+      {timeExpired && (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/95 backdrop-blur-md flex flex-col items-center justify-center text-white p-6">
+          <div className="bg-red-600/20 p-6 rounded-full mb-6">
+            <Clock className="w-16 h-16 text-red-500" />
+          </div>
+          <h1 className="text-4xl font-black mb-4 text-center">TIME'S UP</h1>
+          <p className="text-lg text-slate-300 mb-8 max-w-xl text-center">
+            Your assessment time has expired. Your exam has been locked and you are being redirected to the dashboard.
+          </p>
+          <div className="flex items-center gap-2 text-slate-400">
+            <div className="w-3 h-3 rounded-full bg-slate-400 animate-pulse"></div>
+            <span className="text-sm font-semibold">Redirecting...</span>
+          </div>
+        </div>
+      )}
       <div className="h-screen flex flex-col overflow-hidden bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-slate-100">
         
         {/* HEADER WITH TIMER */}
@@ -251,8 +334,8 @@ export default function ProblemEditorPage({ params }) {
           </div>
 
           {/* Exam Timer Display */}
-          <div className="flex items-center gap-3 bg-slate-100 dark:bg-zinc-800 px-4 py-1.5 rounded-full border" style={{ borderColor: 'var(--card-border)' }}>
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+          <div className={`flex items-center gap-3 bg-slate-100 dark:bg-zinc-800 px-4 py-1.5 rounded-full border transition-colors ${timeExpired ? 'bg-red-100 dark:bg-red-900/30' : ''}`} style={{ borderColor: 'var(--card-border)' }}>
+            <span className={`w-2 h-2 rounded-full ${timeExpired ? 'bg-red-600' : 'bg-red-500 animate-pulse'}`}></span>
             <span className="text-xs font-bold uppercase tracking-widest opacity-60">Time Left</span>
             <span className={`font-mono font-bold ${timeLeft < 300 ? 'text-red-500' : ''}`}>
               {isTimerLoaded ? formatTime(timeLeft) : "--:--:--"}
@@ -360,7 +443,7 @@ export default function ProblemEditorPage({ params }) {
               <div className="flex gap-2">
                 <button 
                   onClick={() => handleRunCode(false)}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || timeExpired}
                   className="px-5 py-1.5 rounded-lg text-sm font-bold bg-slate-200 hover:bg-slate-300 text-slate-800 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-slate-200 transition-colors disabled:opacity-50 flex items-center gap-2"
                 >
                   {isSubmitting ? "Executing..." : "▶ Run"}
@@ -368,7 +451,7 @@ export default function ProblemEditorPage({ params }) {
                 
                 <button 
                   onClick={() => handleRunCode(true)}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || timeExpired}
                   className="px-5 py-1.5 rounded-lg text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white transition-colors shadow-md shadow-blue-600/20 disabled:opacity-50"
                 >
                   {isSubmitting ? "Submitting..." : "Submit"}
@@ -392,6 +475,7 @@ export default function ProblemEditorPage({ params }) {
                   padding: { top: 16 },
                   scrollBeyondLastLine: false,
                   folding: true,
+                  readOnly: timeExpired,
                 }}
               />
             </div>
@@ -424,7 +508,12 @@ export default function ProblemEditorPage({ params }) {
                       {testResults.passed === testResults.total ? 'Accepted' : 'Wrong Answer'} 
                       <span className="text-sm font-semibold ml-2 opacity-70">({testResults.passed}/{testResults.total} testcases passed)</span>
                     </h3>
-                    
+                    {(!testResults.cases || testResults.cases.length === 0) && (
+                      <div className="mb-4 rounded-lg border border-blue-200 dark:border-blue-900/30 bg-blue-50/70 dark:bg-blue-900/10 p-3 text-sm text-blue-800 dark:text-blue-300">
+                        Hidden test cases were evaluated for this submission. Case-level details are not shown.
+                      </div>
+                    )}
+
                     <div className="space-y-4">
                       {(testResults.cases || []).map((tc) => (
                         <div key={tc.id} className={`p-4 border rounded-xl ${tc.passed ? 'bg-green-50/50 dark:bg-green-900/10 border-green-200 dark:border-green-900/30' : 'bg-red-50/50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30'}`}>

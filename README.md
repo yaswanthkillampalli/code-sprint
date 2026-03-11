@@ -1,36 +1,65 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Code Sprint Setup
 
-## Getting Started
+This project has:
+1. Frontend: Next.js app in the repository root.
+2. Backend: Express + MongoDB API in [backend](backend).
 
-First, run the development server:
+## Environment Variables
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+After checking all frontend and backend files, these are the environment variables used by the code.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Backend .env file
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+Create this file:
+1. [backend/.env](backend/.env)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Required variables:
+1. MONGODB_URI
+2. JWT_SECRET
+3. ADMIN_ID
+4. ADMIN_PASSWORD
 
-## Learn More
+Optional variables:
+1. PORT (default is 5000)
+2. JUDGE0_URL (default is http://localhost:2358)
 
-To learn more about Next.js, take a look at the following resources:
+Example backend .env:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+MONGODB_URI=mongodb://127.0.0.1:27017/code-sprint
+JWT_SECRET=replace_with_a_long_random_secret
+ADMIN_ID=admin
+ADMIN_PASSWORD=replace_with_secure_password
+PORT=5000
+JUDGE0_URL=http://localhost:2358
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Frontend .env file
 
-## Deploy on Vercel
+Current frontend code does not read any environment variables.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+You do not need a frontend .env file right now.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+If you later move API base URLs or other settings to env, create:
+1. .env.local in the repository root
+
+## Where Each Key Is Used
+
+Backend usage references:
+1. MONGODB_URI: [backend/server.js](backend/server.js#L23), [backend/seed.js](backend/seed.js#L66)
+2. PORT: [backend/server.js](backend/server.js#L44)
+3. JUDGE0_URL: [backend/controllers/submissionController.js](backend/controllers/submissionController.js#L6)
+4. JWT_SECRET: [backend/controllers/authController.js](backend/controllers/authController.js#L24), [backend/controllers/authController.js](backend/controllers/authController.js#L61), [backend/controllers/authController.js](backend/controllers/authController.js#L87)
+5. ADMIN_ID and ADMIN_PASSWORD: [backend/controllers/authController.js](backend/controllers/authController.js#L60)
+
+## Run Project
+
+Backend:
+1. Open terminal in [backend](backend)
+2. Run: npm install
+3. Run: npm run dev
+
+Frontend:
+1. Open terminal in repository root
+2. Run: npm install
+3. Run: npm run dev
+
+Frontend runs on http://localhost:3000 and backend runs on http://localhost:5000 by default.

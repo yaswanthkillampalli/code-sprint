@@ -25,7 +25,9 @@ exports.submitCode = async (req, res) => {
         if (!template) return res.status(400).json({ success: false, error: `No template for ${language}` });
 
         const finalCode = template.hiddenDriver.replace('{{USER_CODE}}', code);
-        const testCasesToRun = type === 'run' ? question.examples : question.hiddenTestCases;
+        console.log(finalCode); // Debug: Log the final code being sent to Judge0
+        const isRunMode = type === 'run';
+        const testCasesToRun = isRunMode ? question.examples : question.hiddenTestCases;
         const langId = LANGUAGE_IDS[langKey];
 
         const results = [];
@@ -49,15 +51,17 @@ exports.submitCode = async (req, res) => {
             const isPassed = judgeResult.status && judgeResult.status.id === 3;
             if (isPassed) passedCount++;
 
-            results.push({
-                id: i + 1,
-                input: tc.input,
-                expected: tc.output || tc.expectedOutput,
-                actual: judgeResult.stdout ? Buffer.from(judgeResult.stdout, 'base64').toString('utf-8').trim() : 
-                        (judgeResult.stderr ? Buffer.from(judgeResult.stderr, 'base64').toString('utf-8') : "Error"),
-                passed: isPassed,
-                status: judgeResult.status
-            });
+            if (isRunMode) {
+                results.push({
+                    id: i + 1,
+                    input: tc.input,
+                    expected: tc.output || tc.expectedOutput,
+                    actual: judgeResult.stdout ? Buffer.from(judgeResult.stdout, 'base64').toString('utf-8').trim() : 
+                            (judgeResult.stderr ? Buffer.from(judgeResult.stderr, 'base64').toString('utf-8') : "Error"),
+                    passed: isPassed,
+                    status: judgeResult.status
+                });
+            }
         }
 
         // 2. SCORING LOGIC (STRICTLY GATED)
@@ -129,16 +133,21 @@ exports.submitCode = async (req, res) => {
         }
 
         // 3. FINAL RESPONSE
+        const responseData = {
+            // Keep the response status readable for the frontend
+            status: passedCount === testCasesToRun.length ? "Accepted" : "Wrong Answer",
+            passed: passedCount,
+            total: testCasesToRun.length,
+            pointsEarned: totalPointsForResponse
+        };
+
+        if (isRunMode) {
+            responseData.cases = results;
+        }
+
         res.json({
             success: true,
-            data: {
-                // Keep the response status readable for the frontend
-                status: passedCount === testCasesToRun.length ? "Accepted" : "Wrong Answer",
-                passed: passedCount,
-                total: testCasesToRun.length,
-                pointsEarned: totalPointsForResponse, 
-                cases: results
-            }
+            data: responseData
         });
 
     } catch (err) {

@@ -4,7 +4,9 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { fetchAllQuestions, fetchAssessmentById, fetchQuestionsByAssessmentId } from "../../lib/api";
+import { Toaster, toast } from "sonner";
+import { Progress } from "../../components/ui/progress";
+import { fetchAllQuestionsOfUsername, fetchAssessmentById, fetchQuestionsByAssessmentId } from "../../lib/api";
 import useAntiCheat from "../../hooks/useAntiCheat"; // Adjust path as needed
 
 export default function DashboardPage() {
@@ -15,6 +17,7 @@ export default function DashboardPage() {
   
   // Header State
   const [timeLeft, setTimeLeft] = useState(7200); // Default 2 hours in seconds
+  const [totalDuration, setTotalDuration] = useState(7200); // Total duration for progress calculation
   const [userName, setUserName] = useState("Student");
   const [rollNo, setRollNo] = useState("");
 
@@ -68,21 +71,39 @@ export default function DashboardPage() {
 
           // Access Control: Check if the assessment has started
           if (nowMs < startMs) {
-            alert("The assessment has not started yet. Please wait for the scheduled time.");
-            router.push("/"); // Or wherever your waiting area is
-            return; // Stop loading dashboard data
+            toast.error("Assessment Not Started", {
+              description: "Please wait for the scheduled time to begin the assessment.",
+              duration: 4000,
+              style: {
+                padding: '16px',
+                fontSize: '16px',
+                fontWeight: '600'
+              }
+            });
+            setTimeout(() => router.push("/"), 2000);
+            return;
           }
 
           // Access Control: Check if the assessment has already ended
           if (nowMs > endMs) {
-            alert("The assessment has ended. You can review your performance on the leaderboard.");
-            router.push("/leaderboard"); 
-            return; // Stop loading dashboard data
+            toast.error("Assessment Ended", {
+              description: "The assessment has ended. Review your performance on the leaderboard.",
+              duration: 4000,
+              style: {
+                padding: '16px',
+                fontSize: '16px',
+                fontWeight: '600'
+              }
+            });
+            setTimeout(() => router.push("/login"), 2000);
+            return;
           }
 
           // Sync Timer: Calculate exact remaining seconds based on calculated end time
           const remainingSeconds = Math.floor((endMs - nowMs) / 1000);
+          const totalSeconds = durationMinutes * 60;
           setTimeLeft(remainingSeconds > 0 ? remainingSeconds : 0);
+          setTotalDuration(totalSeconds);
         }
 
         // 3. Fetch only questions mapped to the current assessment
@@ -93,7 +114,7 @@ export default function DashboardPage() {
         } else {
           const [assessmentQuestionsRes, progressRes] = await Promise.all([
             fetchQuestionsByAssessmentId(assessmentId),
-            fetchAllQuestions(roll)
+            fetchAllQuestionsOfUsername(roll)
           ]);
 
           const assessmentQuestions = assessmentQuestionsRes?.success
@@ -168,10 +189,17 @@ export default function DashboardPage() {
 
   // 3. Quit Handler
   const handleQuit = () => {
-    if (window.confirm("Are you sure you want to quit? You cannot return to the assessment once you exit.")) {
-      localStorage.clear();
-      router.push("/login"); 
-    }
+    localStorage.clear();
+    toast.success("Exam Ended", { 
+      description: "You have exited the assessment.",
+      duration: 2000,
+      style: {
+        padding: '16px',
+        fontSize: '16px',
+        fontWeight: '600'
+      }
+    });
+    setTimeout(() => router.push("/login"), 1500);
   };
 
   if (isLoading) {
@@ -185,7 +213,21 @@ export default function DashboardPage() {
 
   return (
     <>
-      {/* {!isFullscreen && (
+      <Toaster 
+        position="top-center"
+        richColors
+        theme="light"
+        expand
+        visibleToasts={4}
+        cnf={{
+          style: {
+            '--toast-background': '#ffffff',
+            '--toast-border': '#000000'
+          }
+        }}
+      />
+      
+      {!isFullscreen && (
         <div className="fixed inset-0 z-[9999] bg-slate-900/95 backdrop-blur-md flex flex-col items-center justify-center text-white p-6">
           <div className="bg-red-600/20 p-6 rounded-full mb-6">
             <svg className="w-16 h-16 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
@@ -201,7 +243,7 @@ export default function DashboardPage() {
             Return to Exam
           </button>
         </div>
-      )} */}
+      )}
       <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-slate-100">
         
         {/* HEADER ROW 1: Branding & User Profile */}
@@ -250,6 +292,15 @@ export default function DashboardPage() {
           >
             Quit Exam
           </button>
+        </div>
+
+        {/* TIME PROGRESS BAR - Right to Left */}
+        <div className="w-full h-1 sticky top-16 z-10 shadow-sm" dir="rtl">
+          <Progress 
+            value={Math.max(0, (timeLeft / totalDuration) * 100)}
+            className="w-full h-full rounded-none bg-slate-200 dark:bg-slate-700"
+            style={{ height: "100%" }}
+          />
         </div>
 
         {/* MAIN CONTENT: Problem List */}
