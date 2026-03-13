@@ -14,8 +14,8 @@ const app = express();
 
 // --- MIDDLEWARE ---
 app.use(cors({
-    origin: 'https://code-sprint-ochre.vercel.app', // Next.js Frontend
-    // origin: 'http://localhost:3000', // Local Development
+    // origin: 'https://code-sprint-ochre.vercel.app', // Next.js Frontend
+    origin: 'http://localhost:3000', // Local Development
     credentials: true
 }));
 app.use(express.json());

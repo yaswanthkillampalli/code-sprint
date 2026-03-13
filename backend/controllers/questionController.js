@@ -1,18 +1,41 @@
 const Question = require('../models/Question');
 const AssessmentProgress = require('../models/AssessmentProgress');
+const Assessment = require('../models/Assessment');
 
 const hasTemplatePair = (tpl) => Boolean(tpl && typeof tpl.visibleCode === 'string' && typeof tpl.hiddenDriver === 'string');
 
 exports.getAllQuestionsWithProgress = async (req, res) => {
     try {
-        const { username } = req.query; // rollNo passed from frontend
-        const questions = await Question.find({});
+        const { username, assessmentId } = req.query;
+
+        if (!assessmentId) {
+            return res.status(400).json({ success: false, error: 'assessmentId is required.' });
+        }
+
+        const assessment = await Assessment.findById(assessmentId).select('questions');
+        if (!assessment) {
+            return res.status(404).json({ success: false, error: 'Assessment not found.' });
+        }
+
+        const questionDocs = await Question.find({ _id: { $in: assessment.questions } })
+            .select('title points hiddenTestCases');
+
+        const questionById = new Map(
+            questionDocs.map((q) => [q._id.toString(), q])
+        );
+
+        const questions = assessment.questions
+            .map((questionId) => questionById.get(questionId.toString()))
+            .filter(Boolean);
+
         const progress = username ? await AssessmentProgress.findOne({ username }) : null;
 
+        const progressById = new Map(
+            (progress?.questions || []).map((item) => [item.questionId.toString(), item])
+        );
+
         const questionsWithProgress = questions.map((q) => {
-            const bestProgress = progress?.questions?.find(
-                (item) => item.questionId.toString() === q._id.toString()
-            );
+            const bestProgress = progressById.get(q._id.toString());
 
             const bestPassedCount = bestProgress ? bestProgress.bestPassedCount : 0;
             const totalHidden = q.hiddenTestCases.length;
@@ -28,7 +51,7 @@ exports.getAllQuestionsWithProgress = async (req, res) => {
                 status: bestPassedCount === 0 ? 'UNATTEMPTED' : (bestPassedCount === totalHidden ? 'ACCEPTED' : 'ATTEMPTED')
             };
         });
-        console.log(`📊 Fetched ${questionsWithProgress.length} questions with progress for user: ${username}`);
+
         res.json({ success: true, data: questionsWithProgress });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });

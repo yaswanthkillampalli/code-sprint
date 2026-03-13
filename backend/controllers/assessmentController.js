@@ -234,6 +234,7 @@ exports.getAssessmentById = async (req, res) => {
 
         return res.json({
             success: true,
+            serverNow: new Date().toISOString(),
             data: {
                 id: assessment._id,
                 title: assessment.title,

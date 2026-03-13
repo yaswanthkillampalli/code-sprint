@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Toaster, toast } from "sonner";
+import { toast } from "sonner";
 import { Progress } from "../../components/ui/progress";
 import { fetchAllQuestionsOfUsername, fetchAssessmentById, fetchQuestionsByAssessmentId } from "../../lib/api";
 import useAntiCheat from "../../hooks/useAntiCheat"; // Adjust path as needed
@@ -13,13 +13,31 @@ export default function DashboardPage() {
   const router = useRouter();
   const [problems, setProblems] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const { isFullscreen, enforceFullscreen } = useAntiCheat();
+  const { isFullscreen, enforceFullscreen, tabSwitchCount } = useAntiCheat();
+  const prevCountRef = useRef(tabSwitchCount)
   
   // Header State
-  const [timeLeft, setTimeLeft] = useState(7200); // Default 2 hours in seconds
-  const [totalDuration, setTotalDuration] = useState(7200); // Total duration for progress calculation
+  const [timeLeft, setTimeLeft] = useState(7200); 
+  const [totalDuration, setTotalDuration] = useState(7200);
+  const [assessmentEndMs, setAssessmentEndMs] = useState(null);
+  const [serverOffsetMs, setServerOffsetMs] = useState(0);
   const [userName, setUserName] = useState("Student");
   const [rollNo, setRollNo] = useState("");
+
+  useEffect(() => {
+    if (tabSwitchCount > prevCountRef.current) {
+      toast("Just a gentle reminder", {
+        id: "tab-switch-warning",
+        description: "Please keep this tab active. Navigating away might interrupt your assessment.",
+        action: {
+          label: "Got it",
+          onClick: () => console.log("User acknowledged warning"),
+        },
+      });
+      
+      prevCountRef.current = tabSwitchCount;
+    }
+  }, [tabSwitchCount]);
 
   useEffect(() => {
     // 1. Initialize User Identity from LocalStorage safely
@@ -55,6 +73,9 @@ export default function DashboardPage() {
 
         const examData = examRes.data;
         const currentStatus = examData.status;
+        const serverNowMs = examRes?.serverNow ? new Date(examRes.serverNow).getTime() : Date.now();
+        setServerOffsetMs(serverNowMs - Date.now());
+
         if (currentStatus !== "active") {
           router.push("/");
           return;
@@ -70,7 +91,7 @@ export default function DashboardPage() {
           const endMs = startMs + durationMs;
 
           // Access Control: Check if the assessment has started
-          if (nowMs < startMs) {
+          if (serverNowMs < startMs) {
             toast.error("Assessment Not Started", {
               description: "Please wait for the scheduled time to begin the assessment.",
               duration: 4000,
@@ -85,7 +106,7 @@ export default function DashboardPage() {
           }
 
           // Access Control: Check if the assessment has already ended
-          if (nowMs > endMs) {
+          if (serverNowMs > endMs) {
             toast.error("Assessment Ended", {
               description: "The assessment has ended. Review your performance on the leaderboard.",
               duration: 4000,
@@ -99,9 +120,9 @@ export default function DashboardPage() {
             return;
           }
 
-          // Sync Timer: Calculate exact remaining seconds based on calculated end time
-          const remainingSeconds = Math.floor((endMs - nowMs) / 1000);
+          const remainingSeconds = Math.floor((endMs - serverNowMs) / 1000);
           const totalSeconds = durationMinutes * 60;
+          setAssessmentEndMs(endMs);
           setTimeLeft(remainingSeconds > 0 ? remainingSeconds : 0);
           setTotalDuration(totalSeconds);
         }
@@ -114,7 +135,7 @@ export default function DashboardPage() {
         } else {
           const [assessmentQuestionsRes, progressRes] = await Promise.all([
             fetchQuestionsByAssessmentId(assessmentId),
-            fetchAllQuestionsOfUsername(roll)
+            fetchAllQuestionsOfUsername(roll, assessmentId)
           ]);
 
           const assessmentQuestions = assessmentQuestionsRes?.success
@@ -163,21 +184,62 @@ export default function DashboardPage() {
 
   // 2. Timer Countdown Logic
   useEffect(() => {
-    if (timeLeft <= 0) return;
-    
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          // Auto-submit or lock exam logic can go here later
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    
+    if (!assessmentEndMs) return;
+
+    const tick = () => {
+      const nowMs = Date.now() + serverOffsetMs;
+      const remainingSeconds = Math.max(0, Math.floor((assessmentEndMs - nowMs) / 1000));
+      setTimeLeft(remainingSeconds);
+
+      if (remainingSeconds <= 0) {
+        router.push("/login");
+      }
+    };
+
+    tick();
+    const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
-  }, [timeLeft]);
+  }, [assessmentEndMs, serverOffsetMs, router]);
+
+  // Periodically verify status/timing from server to keep device clocks in sync.
+  useEffect(() => {
+    const assessmentId = localStorage.getItem("assessmentId");
+    if (!assessmentId) return;
+
+    const verifyAssessment = async () => {
+      try {
+        const examRes = await fetchAssessmentById(assessmentId);
+        if (!examRes?.success || !examRes?.data) {
+          router.push("/");
+          return;
+        }
+
+        const examData = examRes.data;
+        const serverNowMs = examRes?.serverNow ? new Date(examRes.serverNow).getTime() : Date.now();
+        setServerOffsetMs(serverNowMs - Date.now());
+
+        if (examData.status !== "active") {
+          router.push("/");
+          return;
+        }
+
+        if (examData.startTime && examData.durationMinutes) {
+          const startMs = new Date(examData.startTime).getTime();
+          const endMs = startMs + examData.durationMinutes * 60 * 1000;
+          setAssessmentEndMs(endMs);
+
+          if (serverNowMs > endMs) {
+            router.push("/login");
+          }
+        }
+      } catch (err) {
+        console.error("Dashboard verify error:", err);
+      }
+    };
+
+    const verifyInterval = setInterval(verifyAssessment, 15000);
+    return () => clearInterval(verifyInterval);
+  }, [router]);
 
   // Format seconds to HH:MM:SS
   const formatTime = (seconds) => {
@@ -213,20 +275,6 @@ export default function DashboardPage() {
 
   return (
     <>
-      <Toaster 
-        position="top-center"
-        richColors
-        theme="light"
-        expand
-        visibleToasts={4}
-        cnf={{
-          style: {
-            '--toast-background': '#ffffff',
-            '--toast-border': '#000000'
-          }
-        }}
-      />
-      
       {!isFullscreen && (
         <div className="fixed inset-0 z-[9999] bg-slate-900/95 backdrop-blur-md flex flex-col items-center justify-center text-white p-6">
           <div className="bg-red-600/20 p-6 rounded-full mb-6">

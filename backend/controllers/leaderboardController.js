@@ -2,7 +2,6 @@ const User = require('../models/User');
 const AssessmentProgress = require('../models/AssessmentProgress');
 
 exports.getLeaderboard = async (req, res) => {
-    console.log('Leaderboard API Triggered');
     try {
         const leaderboard = await AssessmentProgress.aggregate([
             // 1. Join with users to keep participant-only records + profile details.

@@ -30,6 +30,8 @@ export default function ProblemEditorPage({ params }) {
   const { isFullscreen, enforceFullscreen } = useAntiCheat();
   // GLOBAL EXAM TIMER
   const [timeLeft, setTimeLeft] = useState(0); 
+  const [assessmentEndMs, setAssessmentEndMs] = useState(null);
+  const [serverOffsetMs, setServerOffsetMs] = useState(0);
   const [isTimerLoaded, setIsTimerLoaded] = useState(false);
   const [timeExpired, setTimeExpired] = useState(false);
 
@@ -60,6 +62,8 @@ export default function ProblemEditorPage({ params }) {
         }
 
         const examData = examRes.data;
+        const serverNowMs = examRes?.serverNow ? new Date(examRes.serverNow).getTime() : Date.now();
+        setServerOffsetMs(serverNowMs - Date.now());
 
         if (examData.status !== "active") {
           router.push("/");
@@ -81,14 +85,13 @@ export default function ProblemEditorPage({ params }) {
           const startMs = new Date(examData.startTime).getTime();
           const durationMs = examData.durationMinutes * 60 * 1000;
           const endMs = startMs + durationMs;
-          const nowMs = Date.now();
-
-          if (nowMs > endMs) {
+          if (serverNowMs > endMs) {
             router.push("/");
             return;
           }
 
-          const remainingSeconds = Math.floor((endMs - nowMs) / 1000);
+          const remainingSeconds = Math.floor((endMs - serverNowMs) / 1000);
+          setAssessmentEndMs(endMs);
           setTimeLeft(remainingSeconds > 0 ? remainingSeconds : 0);
           setIsTimerLoaded(true);
         }
@@ -135,39 +138,79 @@ export default function ProblemEditorPage({ params }) {
 
   // Timer Countdown Logic
   useEffect(() => {
-    if (!isTimerLoaded || timeLeft <= 0) return;
-    
-    const timerId = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(timerId);
-          setTimeExpired(true);
-          
-          // Show notification
-          toast.error(
-            <div className="flex items-center gap-2">
-              <Clock className="w-5 h-5" />
-              <span className="font-semibold">Time's Up! Exam has ended.</span>
-            </div>,
-            {
-              description: `Your assessment time has expired. Redirecting to dashboard...`,
-              duration: 4000,
-            }
-          );
-          
-          // Redirect after 2 seconds
-          setTimeout(() => {
-            router.push("/login");
-          }, 2000);
-          
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    
+    if (!isTimerLoaded || !assessmentEndMs) return;
+
+    const tick = () => {
+      const nowMs = Date.now() + serverOffsetMs;
+      const remainingSeconds = Math.max(0, Math.floor((assessmentEndMs - nowMs) / 1000));
+      setTimeLeft(remainingSeconds);
+
+      if (remainingSeconds <= 0 && !timeExpired) {
+        setTimeExpired(true);
+
+        toast.error(
+          <div className="flex items-center gap-2">
+            <Clock className="w-5 h-5" />
+            <span className="font-semibold">Time's Up! Exam has ended.</span>
+          </div>,
+          {
+            description: `Your assessment time has expired. Redirecting to dashboard...`,
+            duration: 4000,
+          }
+        );
+
+        setTimeout(() => {
+          router.push("/login");
+        }, 2000);
+      }
+    };
+
+    tick();
+    const timerId = setInterval(tick, 1000);
     return () => clearInterval(timerId);
-  }, [timeLeft, isTimerLoaded, router]);
+  }, [isTimerLoaded, assessmentEndMs, serverOffsetMs, timeExpired, router]);
+
+  useEffect(() => {
+    if (!isTimerLoaded) return;
+
+    const assessmentId = localStorage.getItem("assessmentId");
+    if (!assessmentId) return;
+
+    const verifyAssessment = async () => {
+      try {
+        const examRes = await fetchAssessmentById(assessmentId);
+        if (!examRes?.success || !examRes?.data) {
+          router.push("/");
+          return;
+        }
+
+        const examData = examRes.data;
+        const serverNowMs = examRes?.serverNow ? new Date(examRes.serverNow).getTime() : Date.now();
+        setServerOffsetMs(serverNowMs - Date.now());
+
+        if (examData.status !== "active") {
+          router.push("/");
+          return;
+        }
+
+        if (examData.startTime && examData.durationMinutes) {
+          const startMs = new Date(examData.startTime).getTime();
+          const endMs = startMs + examData.durationMinutes * 60 * 1000;
+          setAssessmentEndMs(endMs);
+
+          if (serverNowMs > endMs && !timeExpired) {
+            setTimeExpired(true);
+            router.push("/login");
+          }
+        }
+      } catch (err) {
+        console.error("Editor verify error:", err);
+      }
+    };
+
+    const verifyInterval = setInterval(verifyAssessment, 15000);
+    return () => clearInterval(verifyInterval);
+  }, [isTimerLoaded, timeExpired, router]);
 
   const formatTime = (seconds) => {
     const h = Math.floor(seconds / 3600).toString().padStart(2, "0");
@@ -194,6 +237,36 @@ export default function ProblemEditorPage({ params }) {
     
     try {
       const executionType = isSubmit ? 'submit' : 'run';
+      const assessmentId = localStorage.getItem("assessmentId");
+
+      if (!assessmentId) {
+        router.push("/");
+        return;
+      }
+
+      if (isSubmit) {
+        const liveExamRes = await fetchAssessmentById(assessmentId);
+        const liveExamData = liveExamRes?.data;
+
+        if (!liveExamRes?.success || !liveExamData || liveExamData.status !== "active") {
+          toast.error("Assessment is not active.");
+          router.push("/");
+          return;
+        }
+
+        if (liveExamData.startTime && liveExamData.durationMinutes) {
+          const liveServerNowMs = liveExamRes?.serverNow ? new Date(liveExamRes.serverNow).getTime() : Date.now();
+          const startMs = new Date(liveExamData.startTime).getTime();
+          const endMs = startMs + liveExamData.durationMinutes * 60 * 1000;
+
+          if (liveServerNowMs < startMs || liveServerNowMs > endMs) {
+            toast.error("Assessment time window has closed.");
+            router.push("/");
+            return;
+          }
+        }
+      }
+
       // Grab the user's roll number to send to the backend
       const studentRollNo = localStorage.getItem("rollNo");
 
@@ -254,7 +327,7 @@ export default function ProblemEditorPage({ params }) {
 
     } catch (err) {
       // LOG 4: Network error or backend crash (500)
-      console.error("❌ CRITICAL ERROR IN handleRunCode:", {
+      console.log("❌ CRITICAL ERROR IN handleRunCode:", {
         message: err.message,
         response: err.response?.data, // If axios error, shows backend crash details
         status: err.response?.status

@@ -65,7 +65,7 @@ export default function WaitingPage() {
   };
 
   const syncAssessmentContext = (assessment) => {
-    const assessmentId = assessment.id || assessment._id;
+    const assessmentId = assessment.id;
 
     if (assessmentId) localStorage.setItem("assessmentId", String(assessmentId));
     if (assessment.title) localStorage.setItem("assessmentTitle", String(assessment.title));

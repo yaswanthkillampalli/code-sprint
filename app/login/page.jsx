@@ -27,7 +27,7 @@ export default function LoginPage() {
       return;
     }
 
-    const assessmentId = assessment.id || assessment._id;
+    const assessmentId = assessment.id;
 
     if (assessmentId) {
       localStorage.setItem("assessmentId", String(assessmentId));
@@ -45,10 +45,6 @@ export default function LoginPage() {
 
   // Clear any existing session data when they land on the login page
   useEffect(() => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("sessionId");
-    localStorage.removeItem("userName");
-    localStorage.removeItem("rollNo");
     clearAssessmentContext();
   }, []);
 
@@ -65,8 +61,6 @@ export default function LoginPage() {
       const res = await loginUser(cleanRoll, cleanPass);
 
       if (res && res.success) {
-        // 1. Token is already saved in localStorage by lib/api.js
-        // 2. Save the Session ID and User Details for the Dashboard
         localStorage.setItem("sessionId", res.user.sessionId);
         localStorage.setItem("userName", res.user.fullName);
         localStorage.setItem("rollNo", res.user.username);
