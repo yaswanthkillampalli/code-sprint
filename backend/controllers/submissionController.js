@@ -36,17 +36,22 @@ exports.submitCode = async (req, res) => {
         // 1. EXECUTION LOOP
         for (let i = 0; i < testCasesToRun.length; i++) {
             const tc = testCasesToRun[i];
+            console.log(tc.input); // Debug: Log the test case being executed
+
+            const safeInput = String(tc.input || "").replace(/\\n/g, '\n');
+            const safeOutput = String(tc.output || tc.expectedOutput || "").replace(/\\n/g, '\n');
+            
             const payload = {
                 language_id: langId,
                 source_code: Buffer.from(finalCode).toString('base64'),
-                stdin: Buffer.from(tc.input).toString('base64'),
-                expected_output: Buffer.from(tc.output || tc.expectedOutput || "").toString('base64'),
+                stdin: Buffer.from(safeInput).toString('base64'),
+                expected_output: Buffer.from(safeOutput).toString('base64'),
                 base64_encoded: true 
             };
-
+            console.log(payload); // Debug: Log the payload being sent to Judge0
             const response = await axios.post(`${JUDGE0_URL}/submissions?wait=true&base64_encoded=true`, payload);
             if (!response || !response.data) continue;
-
+            console.log(response.data); // Debug: Log the raw response from Judge0
             const judgeResult = response.data;
             const isPassed = judgeResult.status && judgeResult.status.id === 3;
             if (isPassed) passedCount++;
