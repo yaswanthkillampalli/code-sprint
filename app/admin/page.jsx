@@ -12,6 +12,7 @@ import {
   updateQuestion,
   removeQuestion,
   createAssessment,
+  updateAssessment,
   fetchLeaderboard,
   fetchAssessments,
   startAssessment,
@@ -72,6 +73,50 @@ const editorLanguageMap = {
   java: "java"
 };
 
+const normalizeColumnName = (name) => String(name || "").toLowerCase().replace(/[\s_-]/g, "");
+
+const getColumnByAlias = (row, aliases) => {
+  const keys = Object.keys(row || {});
+  const normalizedAliases = aliases.map(normalizeColumnName);
+
+  for (const key of keys) {
+    if (normalizedAliases.includes(normalizeColumnName(key))) {
+      const value = row[key];
+      return value == null ? "" : String(value).trim();
+    }
+  }
+
+  return "";
+};
+
+const upsertStagedUsers = (existingUsers, incomingUsers) => {
+  const mergedByUsername = new Map(
+    (existingUsers || []).map((user) => [String(user.username || "").trim(), user])
+  );
+
+  for (const incoming of incomingUsers || []) {
+    const username = String(incoming.username || "").trim();
+    if (!username) continue;
+
+    const previous = mergedByUsername.get(username) || {
+      username,
+      fullName: "",
+      email: "",
+      phone: ""
+    };
+
+    mergedByUsername.set(username, {
+      ...previous,
+      username,
+      fullName: String(incoming.fullName || "").trim() || previous.fullName || "",
+      email: String(incoming.email || "").trim() || previous.email || "",
+      phone: String(incoming.phone || "").trim() || previous.phone || ""
+    });
+  }
+
+  return Array.from(mergedByUsername.values());
+};
+
 export default function AdminDashboard() {
   // --- AUTHENTICATION STATE ---
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -86,12 +131,14 @@ export default function AdminDashboard() {
   const [isCreating, setIsCreating] = useState(false);
   const [problemPool, setProblemPool] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
+  const [isLeaderboardLoading, setIsLeaderboardLoading] = useState(false);
   const [assessmentsList, setAssessmentsList] = useState([]);
   const [questionBank, setQuestionBank] = useState([]);
   const [selectedQuestionId, setSelectedQuestionId] = useState(null);
   const [questionForm, setQuestionForm] = useState(createEmptyQuestionForm());
   const [questionError, setQuestionError] = useState("");
   const [isSavingQuestion, setIsSavingQuestion] = useState(false);
+  const [editingAssessment, setEditingAssessment] = useState(null);
 
   // --- USER MANAGEMENT STATE ---
   const [stagedUsers, setStagedUsers] = useState([]);
@@ -104,6 +151,12 @@ export default function AdminDashboard() {
     selectedProblems: [],
   });
 
+  const resetAssessmentForm = () => {
+    setEditingAssessment(null);
+    setStagedUsers([]);
+    setNewAssessment({ title: "", duration: 120, selectedProblems: [] });
+  };
+
   const loadQuestionData = async () => {
     const [poolRes, fullRes] = await Promise.all([
       fetchAllQuestions(),
@@ -112,6 +165,17 @@ export default function AdminDashboard() {
 
     setProblemPool(poolRes?.data || []);
     setQuestionBank(fullRes?.data || []);
+  };
+
+  const loadLeaderboard = async () => {
+    setIsLeaderboardLoading(true);
+
+    try {
+      const res = await fetchLeaderboard();
+      setLeaderboard(res?.data || []);
+    } finally {
+      setIsLeaderboardLoading(false);
+    }
   };
 
   // --- AUTO-LOGIN: VERIFY TOKEN ON MOUNT ---
@@ -147,7 +211,7 @@ export default function AdminDashboard() {
 
     // Fetch all required data for the dashboard
     loadQuestionData();
-    fetchLeaderboard().then((res) => setLeaderboard(res?.data || []));
+    loadLeaderboard();
     fetchAssessments().then((res) => setAssessmentsList(res?.data || []));
   }, [isAuthenticated]);
 
@@ -168,12 +232,37 @@ export default function AdminDashboard() {
   };
 
   const toggleProblem = (id) => {
+    const normalizedId = String(id);
     setNewAssessment(prev => ({
       ...prev,
-      selectedProblems: prev.selectedProblems.includes(id) 
-        ? prev.selectedProblems.filter(pId => pId !== id)
-        : [...prev.selectedProblems, id]
+      selectedProblems: prev.selectedProblems.includes(normalizedId)
+        ? prev.selectedProblems.filter(pId => pId !== normalizedId)
+        : [...prev.selectedProblems, normalizedId]
     }));
+  };
+
+  const handleEditAssessment = (assessment) => {
+    if (assessment.status === "finished") {
+      alert("Finished assessments cannot be edited.");
+      return;
+    }
+
+    const selectedProblems = (assessment.questions || []).map((questionId) => String(questionId));
+    const hydratedUsers = (assessment.allowedUsers || []).map((username) => ({
+      username: String(username),
+      fullName: "",
+      email: "",
+      phone: ""
+    }));
+
+    setEditingAssessment(assessment);
+    setNewAssessment({
+      title: assessment.title || "",
+      duration: assessment.durationMinutes ?? 120,
+      selectedProblems,
+    });
+    setStagedUsers(hydratedUsers);
+    setIsCreating(true);
   };
 
   const handleNewQuestion = () => {
@@ -305,14 +394,16 @@ export default function AdminDashboard() {
       const ws = wb.Sheets[wsname];
       const data = XLSX.utils.sheet_to_json(ws);
       
-      const formatted = data.map(u => ({
-        username: String(u['Roll Number'] || u['roll'] || "").trim(),
-        fullName: (u['Name'] || u['name'] || "").trim(),
-        email: (u['Email'] || u['email'] || "").trim(),
-        phone: String(u['Phone'] || u['phone'] || "").trim()
-      })).filter(u => u.username && u.phone);
+      const formatted = data
+        .map((row) => ({
+          username: getColumnByAlias(row, ['Roll Number', 'roll', 'rollnumber', 'roll no', 'roll_no', 'username']),
+          fullName: getColumnByAlias(row, ['Full Name', 'fullname', 'name']),
+          email: getColumnByAlias(row, ['Email', 'email']),
+          phone: getColumnByAlias(row, ['Phone', 'phone', 'Phone Number', 'phonenumber', 'mobile'])
+        }))
+        .filter((u) => u.username && u.phone);
 
-      setStagedUsers(prev => [...prev, ...formatted]);
+      setStagedUsers((prev) => upsertStagedUsers(prev, formatted));
     };
     reader.readAsBinaryString(file);
     e.target.value = null; // Reset input so same file can be uploaded again if needed
@@ -320,14 +411,19 @@ export default function AdminDashboard() {
 
   // HANDLE MANUAL ADDITION
   const addManualUser = () => {
-    if(!manualUser.roll || !manualUser.phone) return alert("Roll and Phone are required");
+    const roll = String(manualUser.roll || "").trim();
+    const phone = String(manualUser.phone || "").trim();
+    const fullName = String(manualUser.name || "").trim();
+    const email = String(manualUser.email || "").trim();
+
+    if(!roll || !phone) return alert("Roll and Phone are required");
     
-    setStagedUsers(prev => [...prev, { 
-        username: manualUser.roll, 
-        fullName: manualUser.name, 
-        email: manualUser.email, 
-        phone: manualUser.phone 
-    }]);
+    setStagedUsers((prev) => upsertStagedUsers(prev, [{
+        username: roll,
+        fullName,
+        email,
+        phone
+    }]));
     setManualUser({ roll: "", name: "", email: "", phone: "" });
   };
 
@@ -341,20 +437,22 @@ export default function AdminDashboard() {
     const payload = {
       title: newAssessment.title,
       duration: newAssessment.duration,
-      selectedProblems: newAssessment.selectedProblems,
+      selectedProblems: newAssessment.selectedProblems.map((problemId) => String(problemId)),
       users: stagedUsers
     };
 
-    const res = await createAssessment(payload);
+    const res = editingAssessment?._id
+      ? await updateAssessment(editingAssessment._id, payload)
+      : await createAssessment(payload);
+
     if (res?.success) {
-      alert("Assessment Live and Users Mapped!");
+      alert(editingAssessment ? "Assessment updated successfully!" : "Assessment Live and Users Mapped!");
       setIsCreating(false);
-      setStagedUsers([]);
-      setNewAssessment({ title: "", duration: 120, selectedProblems: [] });
+      resetAssessmentForm();
       // Refresh assessments list
       fetchAssessments().then((data) => setAssessmentsList(data?.data || []));
     } else {
-      alert(res?.error || "Failed to create assessment");
+      alert(res?.error || "Failed to save assessment");
     }
   };
 
@@ -475,19 +573,19 @@ export default function AdminDashboard() {
         
         <nav className="flex-1 p-4 space-y-2">
           <button 
-            onClick={() => { setActiveTab("assessments"); setIsCreating(false); }}
+            onClick={() => { setActiveTab("assessments"); setIsCreating(false); resetAssessmentForm(); }}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'assessments' ? 'bg-blue-600 text-white' : 'hover:bg-slate-100 dark:hover:bg-zinc-800 opacity-70'}`}
           >
             Assessments
           </button>
           <button 
-            onClick={() => { setActiveTab("leaderboard"); setIsCreating(false); }}
+            onClick={() => { setActiveTab("leaderboard"); setIsCreating(false); resetAssessmentForm(); }}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'leaderboard' ? 'bg-blue-600 text-white' : 'hover:bg-slate-100 dark:hover:bg-zinc-800 opacity-70'}`}
           >
             Live Leaderboard
           </button>
           <button 
-            onClick={() => { setActiveTab("questions"); setIsCreating(false); }}
+            onClick={() => { setActiveTab("questions"); setIsCreating(false); resetAssessmentForm(); }}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'questions' ? 'bg-blue-600 text-white' : 'hover:bg-slate-100 dark:hover:bg-zinc-800 opacity-70'}`}
           >
             Questions
@@ -529,7 +627,7 @@ export default function AdminDashboard() {
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-lg font-semibold">Manage Assessments</h2>
                 <button 
-                  onClick={() => setIsCreating(true)}
+                  onClick={() => { resetAssessmentForm(); setIsCreating(true); }}
                   className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-md"
                 >
                   + Create New Assessment
@@ -560,6 +658,11 @@ export default function AdminDashboard() {
                         <div className="flex gap-3">
                           {assessment.status === 'waiting' && (
                             <>
+                              <button
+                                onClick={() => handleEditAssessment(assessment)}
+                                className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-2 rounded-lg font-bold shadow-md transition-colors">
+                                EDIT
+                              </button>
                               <button 
                                 onClick={() => handleStartExam(assessment._id)}
                                 className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-bold shadow-md transition-colors">
@@ -573,11 +676,18 @@ export default function AdminDashboard() {
                             </>
                           )}
                           {assessment.status === 'active' && (
-                            <button 
-                              onClick={() => handleEndExam(assessment._id)}
-                              className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg font-bold shadow-md transition-colors">
-                              END
-                            </button>
+                            <>
+                              <button
+                                onClick={() => handleEditAssessment(assessment)}
+                                className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-2 rounded-lg font-bold shadow-md transition-colors">
+                                EDIT
+                              </button>
+                              <button
+                                onClick={() => handleEndExam(assessment._id)}
+                                className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg font-bold shadow-md transition-colors">
+                                END
+                              </button>
+                            </>
                           )}
                           {assessment.status === 'finished' && (
                             <button 
@@ -606,12 +716,23 @@ export default function AdminDashboard() {
           {/* ========================================== */}
           {activeTab === "assessments" && isCreating && (
             <div className="max-w-4xl mx-auto pb-12">
-              <button onClick={() => setIsCreating(false)} className="text-sm text-blue-600 font-semibold mb-6 flex items-center gap-2 hover:underline">
+              <button onClick={() => { setIsCreating(false); resetAssessmentForm(); }} className="text-sm text-blue-600 font-semibold mb-6 flex items-center gap-2 hover:underline">
                 ← Back to Assessments
               </button>
               
               <div className="bg-white dark:bg-zinc-900 p-8 rounded-xl border shadow-sm" style={{ borderColor: 'var(--card-border)' }}>
-                <h2 className="text-2xl font-bold mb-8">Create New Assessment</h2>
+                <h2 className="text-2xl font-bold mb-3">{editingAssessment ? 'Edit Assessment' : 'Create New Assessment'}</h2>
+                <p className="text-sm opacity-70 mb-8">
+                  {editingAssessment
+                    ? `Editing ${editingAssessment.status.toUpperCase()} assessment.`
+                    : 'Create and map users before launching.'}
+                </p>
+
+                {editingAssessment?.status === 'active' && (
+                  <div className="mb-8 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-300">
+                    Active edit warning: removing users blocks them immediately, and removing questions deletes related submissions and scores.
+                  </div>
+                )}
                 
                 {/* 1. Basic Details */}
                 <div className="grid grid-cols-2 gap-6 mb-8">
@@ -630,7 +751,7 @@ export default function AdminDashboard() {
                   <label className="block text-sm font-bold mb-3 opacity-80">Select Problems ({newAssessment.selectedProblems.length} selected)</label>
                   <div className="border rounded-lg p-2 max-h-48 overflow-y-auto bg-slate-50 dark:bg-zinc-800/20" style={{ borderColor: 'var(--card-border)' }}>
                     {problemPool.map((prob) => {
-                      const problemId = prob.id;
+                      const problemId = String(prob.id || prob._id);
                       const difficulty = prob.difficulty || "Medium";
                       return (
                         <label key={problemId} className="flex items-center justify-between p-3 hover:bg-white dark:hover:bg-zinc-800 rounded-md cursor-pointer transition-colors border border-transparent hover:border-slate-200 dark:hover:border-zinc-700">
@@ -691,7 +812,7 @@ export default function AdminDashboard() {
                     ) : (
                       stagedUsers.map((u, i) => (
                         <div key={i} className="p-3 border-b last:border-0 text-sm flex justify-between items-center hover:bg-slate-50 dark:hover:bg-zinc-800" style={{ borderColor: 'var(--card-border)' }}>
-                          <span className="font-mono">{u.username} <span className="font-sans ml-2 opacity-70">- {u.fullName || "No Name"}</span></span>
+                          <span className="font-mono">{u.username} <span className="font-sans ml-2 opacity-70">- {u.fullName || u.username || "No Name"}</span></span>
                           <button onClick={() => setStagedUsers(stagedUsers.filter((_, idx) => idx !== i))} className="text-red-500 text-xs font-bold hover:underline">Remove</button>
                         </div>
                       ))
@@ -700,7 +821,7 @@ export default function AdminDashboard() {
                 </div>
 
                 <button onClick={handleCreateSubmit} className="mt-8 w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-xl font-bold shadow-lg transition-transform active:scale-[0.98] text-lg">
-                  FINALIZE & CREATE ASSESSMENT
+                  {editingAssessment ? 'SAVE ASSESSMENT CHANGES' : 'FINALIZE & CREATE ASSESSMENT'}
                 </button>
               </div>
             </div>
@@ -711,7 +832,22 @@ export default function AdminDashboard() {
           {/* ========================================== */}
           {activeTab === "leaderboard" && (
             <div>
-              <h2 className="text-xl font-bold mb-6">Live Leaderboard</h2>
+              <div className="mb-6 flex items-center justify-between gap-4">
+                <h2 className="text-xl font-bold">Live Leaderboard</h2>
+                <button
+                  type="button"
+                  onClick={loadLeaderboard}
+                  disabled={isLeaderboardLoading}
+                  className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-zinc-800"
+                  style={{ borderColor: 'var(--card-border)' }}
+                >
+                  <svg className={`h-4 w-4 ${isLeaderboardLoading ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 1 1-2.64-6.36" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 3v6h-6" />
+                  </svg>
+                  {isLeaderboardLoading ? 'Refreshing...' : 'Refresh'}
+                </button>
+              </div>
               <div className="rounded-xl border overflow-hidden bg-white dark:bg-zinc-900 shadow-sm" style={{ borderColor: 'var(--card-border)' }}>
                 <table className="w-full text-left border-collapse">
                   <thead>

@@ -13,6 +13,20 @@ const LANGUAGE_IDS = {
     'java': 62     // Java (OpenJDK 13.0.1)
 };
 
+async function waitForResult(token) {
+    while (true) {
+        const res = await axios.get(`${JUDGE0_URL}/submissions/${token}?base64_encoded=true`);
+        const statusId = res.data.status.id;
+
+        // 1 = In Queue, 2 = Processing
+        if (statusId > 2) {
+            return res.data;
+        }
+
+        await new Promise(r => setTimeout(r, 200));
+    }
+}
+
 exports.submitCode = async (req, res) => {
     try {
         const { questionId, language, code, type = 'run', username } = req.body;
@@ -31,10 +45,6 @@ exports.submitCode = async (req, res) => {
 
         if (assessment.status !== 'active') {
             return res.status(403).json({ success: false, error: "Assessment is not active." });
-        }
-
-        if (!assessment.startTime || !assessment.durationMinutes) {
-            return res.status(403).json({ success: false, error: "Assessment timing is not configured." });
         }
 
         const nowMs = Date.now();
@@ -58,37 +68,59 @@ exports.submitCode = async (req, res) => {
         }
 
         const question = await Question.findById(questionId);
-        if (!question) return res.status(404).json({ success: false, error: "Question not found" });
+        if (!question) {
+            return res.status(404).json({ success: false, error: "Question not found" });
+        }
 
         const langKey = language.toLowerCase();
         const template = question.templates[langKey];
-        if (!template) return res.status(400).json({ success: false, error: `No template for ${language}` });
+        if (!template) {
+            return res.status(400).json({ success: false, error: `No template for ${language}` });
+        }
 
         const finalCode = template.hiddenDriver.replace('{{USER_CODE}}', code);
         const isRunMode = type === 'run';
         const testCasesToRun = isRunMode ? question.examples : question.hiddenTestCases;
         const langId = LANGUAGE_IDS[langKey];
 
-        const results = [];
-        let passedCount = 0;
+        const tokens = [];
 
-        // 1. EXECUTION LOOP
+        // SUBMIT ALL TESTCASES
         for (let i = 0; i < testCasesToRun.length; i++) {
             const tc = testCasesToRun[i];
 
             const safeInput = String(tc.input || "").replace(/\\n/g, '\n');
             const safeOutput = String(tc.output || tc.expectedOutput || "").replace(/\\n/g, '\n');
-            
+
             const payload = {
                 language_id: langId,
                 source_code: Buffer.from(finalCode).toString('base64'),
                 stdin: Buffer.from(safeInput).toString('base64'),
                 expected_output: Buffer.from(safeOutput).toString('base64'),
-                base64_encoded: true 
+                base64_encoded: true
             };
-            const response = await axios.post(`${JUDGE0_URL}/submissions?wait=true&base64_encoded=true`, payload);
-            if (!response || !response.data) continue;
-            const judgeResult = response.data;
+
+            const response = await axios.post(`${JUDGE0_URL}/submissions?base64_encoded=true`, payload);
+
+            tokens.push({
+                token: response.data.token,
+                tc,
+                index: i
+            });
+        }
+
+        // FETCH RESULTS
+        const judgeResults = await Promise.all(
+            tokens.map(t => waitForResult(t.token))
+        );
+
+        const results = [];
+        let passedCount = 0;
+
+        for (let i = 0; i < judgeResults.length; i++) {
+            const judgeResult = judgeResults[i];
+            const tc = tokens[i].tc;
+
             const isPassed = judgeResult.status && judgeResult.status.id === 3;
             if (isPassed) passedCount++;
 
@@ -97,29 +129,34 @@ exports.submitCode = async (req, res) => {
                     id: i + 1,
                     input: tc.input,
                     expected: tc.output || tc.expectedOutput,
-                    actual: judgeResult.stdout ? Buffer.from(judgeResult.stdout, 'base64').toString('utf-8').trim() : 
-                            (judgeResult.stderr ? Buffer.from(judgeResult.stderr, 'base64').toString('utf-8') : "Error"),
+                    actual: judgeResult.stdout
+                        ? Buffer.from(judgeResult.stdout, 'base64').toString('utf-8').trim()
+                        : (judgeResult.stderr
+                            ? Buffer.from(judgeResult.stderr, 'base64').toString('utf-8')
+                            : "Error"),
                     passed: isPassed,
                     status: judgeResult.status
                 });
             }
         }
 
-        // 2. SCORING LOGIC (STRICTLY GATED)
-        // ... (imports and execution loop remain the same)
-
-        // 2. SCORING LOGIC (STRICTLY GATED)
+        // SCORING
         let totalPointsForResponse = 0;
 
         if (type === 'submit' && username) {
-            // 1. Find or initialize this user's progress document
+
             let progress = await AssessmentProgress.findOne({ username });
+
             if (!progress) {
-                progress = new AssessmentProgress({ username, totalScore: 0, questions: [] });
+                progress = new AssessmentProgress({
+                    username,
+                    totalScore: 0,
+                    questions: []
+                });
             }
 
             const questionProgress = progress.questions.find(
-                (q) => q.questionId.toString() === questionId.toString()
+                q => q.questionId.toString() === questionId.toString()
             );
 
             const previousBest = questionProgress ? questionProgress.bestPassedCount : 0;
@@ -127,8 +164,8 @@ exports.submitCode = async (req, res) => {
 
             let pointsAwarded = 0;
 
-            // 2. If they improved, calculate the points to add to their totalScore
             if (currentScore > previousBest) {
+
                 pointsAwarded = currentScore - previousBest;
 
                 if (questionProgress) {
@@ -149,9 +186,9 @@ exports.submitCode = async (req, res) => {
                 }
 
                 progress.totalScore += pointsAwarded;
+
                 await progress.save();
 
-                // Keep User.totalScore in sync for existing screens using user scores.
                 await User.updateOne(
                     { username },
                     {
@@ -159,20 +196,18 @@ exports.submitCode = async (req, res) => {
                         $set: { lastSubmissionTime: new Date() }
                     }
                 );
+
             } else {
                 await User.updateOne(
                     { username },
                     { $set: { lastSubmissionTime: new Date() } }
                 );
             }
-            
-            totalPointsForResponse = pointsAwarded;
 
+            totalPointsForResponse = pointsAwarded;
         }
 
-        // 3. FINAL RESPONSE
         const responseData = {
-            // Keep the response status readable for the frontend
             status: passedCount === testCasesToRun.length ? "Accepted" : "Wrong Answer",
             passed: passedCount,
             total: testCasesToRun.length,
@@ -190,6 +225,9 @@ exports.submitCode = async (req, res) => {
 
     } catch (err) {
         console.error("❌ BACKEND ERROR:", err.message);
-        res.status(500).json({ success: false, error: "Execution server error" });
+        res.status(500).json({
+            success: false,
+            error: "Execution server error"
+        });
     }
 };

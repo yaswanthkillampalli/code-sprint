@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, use, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Editor from "@monaco-editor/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
-import { Zap, Trophy, Clock } from "lucide-react";
+import { AlertTriangle, Zap, Clock } from "lucide-react";
 import {
   fetchQuestionById,
   fetchAssessmentById,
@@ -27,13 +27,29 @@ export default function ProblemEditorPage({ params }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState("testcases"); 
   const [testResults, setTestResults] = useState(null);
-  const { isFullscreen, enforceFullscreen } = useAntiCheat();
+  const { isFullscreen, enforceFullscreen, tabSwitchCount } = useAntiCheat();
+  const prevTabSwitchCountRef = useRef(tabSwitchCount);
   // GLOBAL EXAM TIMER
   const [timeLeft, setTimeLeft] = useState(0); 
   const [assessmentEndMs, setAssessmentEndMs] = useState(null);
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
   const [isTimerLoaded, setIsTimerLoaded] = useState(false);
   const [timeExpired, setTimeExpired] = useState(false);
+
+  useEffect(() => {
+    if (tabSwitchCount > prevTabSwitchCountRef.current) {
+      toast("Just a gentle reminder", {
+        id: "editor-tab-switch-warning",
+        description: "Please keep this tab active. Navigating away might interrupt your assessment.",
+        action: {
+          label: "Got it",
+          onClick: () => console.log("User acknowledged warning"),
+        },
+      });
+
+      prevTabSwitchCountRef.current = tabSwitchCount;
+    }
+  }, [tabSwitchCount]);
 
   // Initial Data Fetch & Global Timer Sync
   useEffect(() => {
@@ -531,6 +547,18 @@ export default function ProblemEditorPage({ params }) {
                 </button>
               </div>
             </div>
+
+            {tabSwitchCount > 0 && (
+              <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-200">
+                <div className="flex items-center gap-2 font-semibold">
+                  <AlertTriangle className="h-4 w-4" />
+                  Tab switch detected
+                </div>
+                <p className="mt-1 text-xs opacity-80">
+                  Keep this tab focused for the rest of the assessment. Recorded switches: {tabSwitchCount}.
+                </p>
+              </div>
+            )}
 
             {/* MONACO EDITOR */}
             <div className="flex-1 relative">
