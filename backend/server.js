@@ -12,12 +12,25 @@ const leaderboardRoutes = require('./routes/leaderboardRoutes');
 
 const app = express();
 
-// --- MIDDLEWARE ---
+const frontendURL = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+const allowedOrigins = [
+  'https://code-sprint-ochre.vercel.app',
+  'http://localhost:3000',
+  frontendURL
+];
+
 app.use(cors({
-    // origin: 'https://code-sprint-ochre.vercel.app', // Next.js Frontend
-    origin: 'http://localhost:3000', // Local Development
-    credentials: true
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
 }));
+
 app.use(express.json());
 
 // --- MONGODB CONNECTION ---
