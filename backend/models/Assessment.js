@@ -9,4 +9,6 @@ const AssessmentSchema = new mongoose.Schema({
     allowedUsers: [{ type: String }] // Array of Roll Numbers from Excel
 });
 
+AssessmentSchema.index({ allowedUsers: 1 });
+
 module.exports = mongoose.model('Assessment', AssessmentSchema);
