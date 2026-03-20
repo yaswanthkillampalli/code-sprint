@@ -7,6 +7,10 @@ import { loginUser } from "../../lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
+  const appTitle = process.env.NEXT_PUBLIC_APP_TITLE || "Code Sprint 2026";
+  const providerName = process.env.NEXT_PUBLIC_PROVIDER_NAME || "Dhanekula Institute of Engineering & Technology";
+  const logoUrl = process.env.NEXT_PUBLIC_LOGO_URL || "/diet-logo.png";
+  const logoAlt = process.env.NEXT_PUBLIC_LOGO_ALT || "Platform logo";
   const [rollNo, setRollNo] = useState("");
   const [password, setPassword] = useState(""); // This is their Phone Number
   const [loading, setLoading] = useState(false);
@@ -89,15 +93,33 @@ export default function LoginPage() {
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-600/10 dark:bg-blue-600/5 rounded-full blur-3xl pointer-events-none"></div>
 
       <div className="max-w-md w-full relative z-10">
+
+        {/* Login Route Tabs */}
+        <div className="mb-5 bg-white/80 dark:bg-zinc-900/80 backdrop-blur rounded-xl border border-slate-200 dark:border-zinc-800 p-1 flex items-center gap-1 shadow-sm">
+          <button
+            type="button"
+            className="flex-1 px-4 py-2.5 text-sm font-semibold rounded-lg bg-blue-600 text-white shadow-sm"
+            aria-current="page"
+          >
+            Participant
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push("/admin")}
+            className="flex-1 px-4 py-2.5 text-sm font-semibold rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
+          >
+            Admin Panel
+          </button>
+        </div>
         
         {/* College Branding Header */}
         <div className="text-center mb-8">
           <div className="w-20 h-20 mx-auto relative mb-4 bg-white rounded-2xl shadow-sm p-2 border border-slate-200 dark:border-zinc-800">
             {/* Make sure you have a diet-logo.png in your public folder */}
-            <Image src="/diet-logo.png" alt="DIET Logo" fill className="object-contain p-2" sizes="80px" />
+            <Image src={logoUrl} alt={logoAlt} fill className="object-contain p-2" sizes="80px" unoptimized />
           </div>
-          <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">Code Sprint 2026</h1>
-          <p className="text-slate-500 dark:text-slate-400 mt-2 font-medium">Dhanekula Institute of Engineering & Technology</p>
+          <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">{appTitle}</h1>
+          <p className="text-slate-500 dark:text-slate-400 mt-2 font-medium">{providerName}</p>
         </div>
 
         {/* Login Card */}

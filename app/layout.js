@@ -2,6 +2,9 @@ import { Poppins } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
 
+const appTitle = process.env.NEXT_PUBLIC_APP_TITLE || "Code Sprint 2026";
+const providerName = process.env.NEXT_PUBLIC_PROVIDER_NAME || "Secure Online Assessment Platform";
+
 const poppins = Poppins({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700", "800"],
@@ -9,8 +12,8 @@ const poppins = Poppins({
 });
 
 export const metadata = {
-  title: "Code Sprint 2026",
-  description: "Secure Online Assessment Platform",
+  title: appTitle,
+  description: providerName,
 };
 
 export default function RootLayout({ children }) {

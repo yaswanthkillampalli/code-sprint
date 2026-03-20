@@ -7,6 +7,10 @@ import { fetchAssessmentById } from "../lib/api";
 
 export default function WaitingPage() {
   const router = useRouter();
+  const appTitle = process.env.NEXT_PUBLIC_APP_TITLE || "Code Sprint 2026";
+  const providerName = process.env.NEXT_PUBLIC_PROVIDER_NAME || "Dhanekula Institute";
+  const logoUrl = process.env.NEXT_PUBLIC_LOGO_URL || "/diet-logo.png";
+  const logoAlt = process.env.NEXT_PUBLIC_LOGO_ALT || "Platform logo";
   const [examStatus, setExamStatus] = useState("waiting"); // waiting | countdown | active | finished
   const [details, setDetails] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -160,9 +164,9 @@ export default function WaitingPage() {
       <nav className="w-full h-16 border-b flex items-center justify-between px-6 bg-white dark:bg-zinc-900 shadow-sm" style={{ borderColor: 'var(--card-border)' }}>
         <div className="flex items-center gap-3">
           <div className="relative w-8 h-8 rounded overflow-hidden">
-            <Image src="/diet-logo.png" alt="Logo" fill className="object-cover" sizes="32px" />
+            <Image src={logoUrl} alt={logoAlt} fill className="object-contain" sizes="32px" unoptimized />
           </div>
-          <span className="font-semibold text-lg tracking-tight">Code Sprint 2026 - Dhanekula Institute</span>
+          <span className="font-semibold text-lg tracking-tight">{`${appTitle} - ${providerName}`}</span>
         </div>
 
         <button

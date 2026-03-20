@@ -1,65 +1,111 @@
-# Code Sprint Setup
+# Code Sprint
 
-This project has:
-1. Frontend: Next.js app in the repository root.
-2. Backend: Express + MongoDB API in [backend](backend).
+Online coding assessment platform with:
+- Next.js frontend (root workspace)
+- Express + MongoDB backend ([backend](backend))
 
-## Environment Variables
+## Features
 
-After checking all frontend and backend files, these are the environment variables used by the code.
+- Participant login and assessment flow
+- Admin control panel for assessment operations
+- Question management and submissions
+- Environment-based branding for title, provider, and logo
 
-### Backend .env file
+## Tech Stack
 
-Create this file:
-1. [backend/.env](backend/.env)
+- Frontend: Next.js, React, Tailwind CSS
+- Backend: Express, Mongoose, JWT
+- Database: MongoDB
 
-Required variables:
-1. MONGODB_URI
-2. JWT_SECRET
-3. ADMIN_ID
-4. ADMIN_PASSWORD
+## Project Structure
 
-Optional variables:
-1. PORT (default is 5000)
-2. JUDGE0_URL (default is http://localhost:2358)
+- Frontend app: [app](app)
+- UI components: [components](components)
+- Backend API: [backend](backend)
+- API client: [lib/api.js](lib/api.js)
 
-Example backend .env:
+## Environment Setup
 
-MONGODB_URI=mongodb://127.0.0.1:27017/code-sprint
-JWT_SECRET=replace_with_a_long_random_secret
-ADMIN_ID=admin
-ADMIN_PASSWORD=replace_with_secure_password
-PORT=5000
-JUDGE0_URL=http://localhost:2358
+This repository now includes safe env templates:
 
-### Frontend .env file
+- Frontend template: [.env.local.example](.env.local.example)
+- Backend template: [backend/.env.example](backend/.env.example)
 
-Current frontend code does not read any environment variables.
+### 1. Frontend env
 
-You do not need a frontend .env file right now.
+Create [.env.local](.env.local) in the repository root using the template.
 
-If you later move API base URLs or other settings to env, create:
-1. .env.local in the repository root
+Variables:
+- NEXT_PUBLIC_APP_TITLE (optional, default: Code Sprint 2026)
+- NEXT_PUBLIC_PROVIDER_NAME (optional, default: Dhanekula Institute of Engineering & Technology)
+- NEXT_PUBLIC_LOGO_URL (optional, default: /diet-logo.png)
+- NEXT_PUBLIC_LOGO_ALT (optional, default: Platform logo)
+- NEXT_PUBLIC_API_BASE_URL (optional, default: http://localhost:5000/api)
 
-## Where Each Key Is Used
+### 2. Backend env
 
-Backend usage references:
-1. MONGODB_URI: [backend/server.js](backend/server.js#L23), [backend/seed.js](backend/seed.js#L66)
-2. PORT: [backend/server.js](backend/server.js#L44)
-3. JUDGE0_URL: [backend/controllers/submissionController.js](backend/controllers/submissionController.js#L6)
-4. JWT_SECRET: [backend/controllers/authController.js](backend/controllers/authController.js#L24), [backend/controllers/authController.js](backend/controllers/authController.js#L61), [backend/controllers/authController.js](backend/controllers/authController.js#L87)
-5. ADMIN_ID and ADMIN_PASSWORD: [backend/controllers/authController.js](backend/controllers/authController.js#L60)
+Create [backend/.env](backend/.env) using the template.
 
-## Run Project
+Required:
+- MONGODB_URI
+- JWT_SECRET
+- ADMIN_ID
+- ADMIN_PASSWORD
 
-Backend:
+Optional:
+- PORT (default: 5000)
+- JUDGE0_URL (default: http://localhost:2358)
+- FRONTEND_URL (default: http://localhost:3000)
+
+## Local Development
+
+### Run backend
+
 1. Open terminal in [backend](backend)
-2. Run: npm install
-3. Run: npm run dev
+2. Install dependencies:
 
-Frontend:
+```bash
+npm install
+```
+
+3. Start backend in dev mode:
+
+```bash
+npm run dev
+```
+
+Backend default URL: http://localhost:5000
+
+### Run frontend
+
 1. Open terminal in repository root
-2. Run: npm install
-3. Run: npm run dev
+2. Install dependencies:
 
-Frontend runs on http://localhost:3000 and backend runs on http://localhost:5000 by default.
+```bash
+npm install
+```
+
+3. Start frontend in dev mode:
+
+```bash
+npm run dev
+```
+
+Frontend default URL: http://localhost:3000
+
+## Production Notes
+
+- Set all env variables in your hosting platforms (frontend and backend separately).
+- Only use NEXT_PUBLIC_ prefix for non-sensitive frontend values.
+- Never commit real secrets (JWT secret, DB URI, admin password) to git.
+
+## Branding Configuration
+
+You can rebrand for any college/provider without code changes by setting:
+
+- NEXT_PUBLIC_APP_TITLE
+- NEXT_PUBLIC_PROVIDER_NAME
+- NEXT_PUBLIC_LOGO_URL
+- NEXT_PUBLIC_LOGO_ALT
+
+These values are used in the login page and participant header.
