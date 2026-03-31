@@ -16,6 +16,7 @@ const frontendURL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 const allowedOrigins = [
   'https://code-sprint-ochre.vercel.app',
+  'https://code.yashdev.tech',
   'http://localhost:3000',
   frontendURL
 ];
