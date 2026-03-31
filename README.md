@@ -99,6 +99,15 @@ Frontend default URL: http://localhost:3000
 - Only use NEXT_PUBLIC_ prefix for non-sensitive frontend values.
 - Never commit real secrets (JWT secret, DB URI, admin password) to git.
 
+## Sample Deployment
+
+link : https://code.yashdev.tech
+
+## sample credentials
+
+id : admin@0911
+password : CodeSprint@0911
+
 ## Branding Configuration
 
 You can rebrand for any college/provider without code changes by setting:
